@@ -66,6 +66,10 @@ h2{font-size:18px;font-weight:800;margin:4px 0 10px}
 .acct .an{font-weight:700}.acct .as{font-size:12px;color:var(--mute)}
 .acct .ab{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:18px}
 label{display:block;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--mute);margin:12px 0 6px}
+.row2>*{min-width:0}
+input[type=date]{-webkit-appearance:none;appearance:none;min-width:0;max-width:100%;display:block;text-align:left;min-height:50px}
+input[type=date]::-webkit-date-and-time-value{text-align:left}
+.calcbox{background:var(--card2);border:2px dashed var(--line);border-radius:14px;padding:12px;font-size:18px;font-weight:700;color:var(--lime)}
 input,select,textarea{width:100%;background:var(--card2);border:2px solid var(--line);color:var(--ink);border-radius:14px;padding:12px;font:inherit;font-size:16px;outline:none}
 input:focus,select:focus,textarea:focus{border-color:var(--sky)}
 textarea{min-height:78px;resize:vertical}
@@ -205,10 +209,9 @@ dialog::backdrop{background:#000a;backdrop-filter:blur(3px)}
       <label>Main limit on the home screen</label>
       <div class="seg" id="sMode"><button data-mode="daily">Daily</button><button data-mode="weekly">Weekly</button></div>
       <div class="row2">
-        <div><label for="sDaily">Daily limit ($)</label><input id="sDaily" inputmode="decimal" class="mono"></div>
-        <div><label for="sWeekly">Weekly limit ($)</label><input id="sWeekly" inputmode="decimal" class="mono"></div>
+        <div><label>Daily limit</label><div class="calcbox mono" id="sDaily"></div></div>
+        <div><label>Weekly limit</label><div class="calcbox mono" id="sWeekly"></div></div>
       </div>
-      <button class="btn ghost full" id="splitEven" style="margin-top:12px">⚖️ Split the total evenly across the days</button>
       <div class="note" id="splitNote"></div>
     </div>
     <div class="card" id="acctSettings">
@@ -222,7 +225,7 @@ dialog::backdrop{background:#000a;backdrop-filter:blur(3px)}
       <label for="sKey">API key</label>
       <div style="display:flex;gap:8px"><input type="password" id="sKey" placeholder="AIza…" autocomplete="off" class="mono"><button class="btn sm ghost" id="showKey">👁️</button></div>
       <label for="sModel">Model</label>
-      <input id="sModel" class="mono" placeholder="gemini-2.5-flash">
+      <input id="sModel" class="mono" placeholder="gemini-3.8-flash">
       <button class="btn ghost full" id="testKey" style="margin-top:12px">🧪 Test my key</button>
       <div class="note">Your key stays on this device only and goes straight to Google. Get one at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.</div>
     </div>
@@ -292,9 +295,12 @@ const num=v=>{const n=parseFloat(String(v).replace(/[$,\s]/g,''));return isFinit
 const sum=a=>a.reduce((t,p)=>t+(+p.amount||0),0);
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 
-function defaults(){return{settings:{total:700,start:todayISO(),end:'2026-12-04',mode:'daily',daily:33,weekly:233,apiKey:'',model:'gemini-2.5-flash'},accounts:[],purchases:[],favs:[],lastAcct:''}}
+function defaults(){return{settings:{total:700,start:todayISO(),end:'2026-12-04',mode:'daily',daily:33,weekly:233,apiKey:'',model:'gemini-3.8-flash'},accounts:[],purchases:[],favs:[],lastAcct:''}}
 function load(){const d=defaults();try{const s=JSON.parse(localStorage.getItem(LS));if(s){return{...d,...s,settings:{...d.settings,...(s.settings||{})},accounts:s.accounts||[],purchases:s.purchases||[],favs:s.favs||[]}}}catch(e){}return d}
 let state=load();
+// limits always follow the budget: daily = total ÷ days, weekly = total ÷ weeks (days ÷ 7)
+function recalcLimits(){const s=state.settings,days=Math.max(1,diffDays(s.start,s.end)+1);s.daily=Math.round(s.total/days*100)/100;s.weekly=Math.round(s.total/(days/7)*100)/100}
+recalcLimits();
 function save(){try{localStorage.setItem(LS,JSON.stringify(state));return true}catch(e){toast('Storage is full 😵 Export a backup, then delete some old screenshots',true);return false}}
 
 let toastT;function toast(msg,bad,undo){const t=$('#toast');t.textContent=msg;t.className='on'+(bad?' bad':'');t.style.pointerEvents=undo?'auto':'none';
@@ -342,8 +348,13 @@ function renderHome(){
   // pace
   let paceHTML;
   if(c.status==='after')paceHTML=`<div class="label">Final score</div><div class="mid mono" style="color:var(--${c.remaining>=0?'lime':'pink'})">${money(c.remaining)}</div><div class="muted">${c.remaining>=0?'left over 🎉':'over budget'}</div>`;
-  else{const ok=c.pace>=s.daily;
-    paceHTML=`<div class="label">To hit $0 on ${short(s.end)}</div><div class="mid mono" style="color:var(--${c.pace<0?'pink':ok?'lime':'sun'})">${money(c.pace)}</div><div class="muted">per day${c.pace>0?' · ≈'+money0(c.pace*7)+'/wk':''}</div><div class="note" style="margin-top:6px">${c.pace<0?'Budget’s blown 😬 time to reset the plan.':ok?'Your limit fits 🎈':'Your '+money0(s.daily)+'/day is now too much, aim lower 😬'}</div>`}
+  else{const d=Math.round((c.pace-s.daily)*100)/100;
+    const col=c.pace<0?'pink':d>=0?'lime':'sun';
+    const msg=c.pace<0?'Budget’s used up 😬 Time to reset the plan in Settings.'
+      :Math.abs(d)<0.01?`Right on track 🎯 Same as your ${money(s.daily)} plan.`
+      :d>0?`🎈 ${money(d)}/day MORE than your plan. You saved some earlier!`
+      :`😬 ${money(-d)}/day less than your plan, to make up for earlier spending.`;
+    paceHTML=`<div class="label">Your daily budget now</div><div class="mid mono" style="color:var(--${col})">${money(c.pace)}</div><div class="muted">per day from today → ${short(s.end)}</div><div class="note" style="margin-top:6px">${msg}</div>`}
   $('#paceCard').innerHTML=paceHTML;
   renderAccounts();renderWeeks(c);
   const rec=[...state.purchases].sort((a,b)=>(b.ts||0)-(a.ts||0)).slice(0,5);
@@ -465,9 +476,21 @@ Return ONLY JSON shaped like: {"entries":[{"name":"","amount":0,"category":"","d
 User note: ${note||'(none)'}`}
 async function callGemini(parts){
   const s=state.settings;
-  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(s.model.trim()||'gemini-2.5-flash')}:generateContent`,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':s.apiKey.trim()},body:JSON.stringify({contents:[{role:'user',parts}],generationConfig:{responseMimeType:'application/json',temperature:0.1}})});
+  const key=s.apiKey.replace(/[^\x21-\x7E]/g,''); // strips spaces/invisible characters picked up when pasting
+  const model=(s.model.trim()||'gemini-3.8-flash').replace(/^models\//,'');
+  let r;
+  try{
+    r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{role:'user',parts}],generationConfig:{responseMimeType:'application/json'}})});
+  }catch(e){
+    throw new Error(navigator.onLine===false?'You’re offline 📵':'Couldn’t reach Google. Open the app from your tafrancois.github.io link (not a downloaded file) and turn off any VPN/content blocker for a sec');
+  }
   const j=await r.json().catch(()=>({}));
-  if(!r.ok)throw new Error(j.error?.message||('Gemini error '+r.status));
+  if(!r.ok){const m=j.error?.message||('Gemini error '+r.status);
+    if(r.status===404)throw new Error(`Google doesn’t know a model called "${model}". Check the spelling in Settings`);
+    if(r.status===400&&/api key/i.test(m))throw new Error('That API key isn’t valid. Re-copy it from AI Studio');
+    if(r.status===403)throw new Error('Key blocked: in Google Cloud, make sure the key allows the "Generative Language API" and your github.io site');
+    if(r.status===429)throw new Error('Rate limit hit. Wait a minute and try again');
+    throw new Error(m)}
   return(j.candidates?.[0]?.content?.parts||[]).filter(p=>!p.thought).map(p=>p.text||'').join('');
 }
 $('#aiBtn').onclick=async()=>{
@@ -526,19 +549,18 @@ $('#addAcct').onclick=()=>{const n=state.accounts.length;const a={id:uid(),name:
 
 /* ---------- SETTINGS ---------- */
 function renderSettings(){const s=state.settings;
-  $('#sTotal').value=s.total;$('#sStart').value=s.start;$('#sEnd').value=s.end;$('#sDaily').value=s.daily;$('#sWeekly').value=s.weekly;$('#sKey').value=s.apiKey;$('#sModel').value=s.model;
+  $('#sTotal').value=s.total;$('#sStart').value=s.start;$('#sEnd').value=s.end;$('#sDaily').textContent=money(s.daily);$('#sWeekly').textContent=money(s.weekly);$('#sKey').value=s.apiKey;$('#sModel').value=s.model;
   document.querySelectorAll('#sMode button').forEach(b=>b.classList.toggle('on',b.dataset.mode===s.mode));
-  const days=Math.max(1,diffDays(s.start,s.end)+1);$('#splitNote').textContent=`${days} days in your window → ${money(s.total/days)}/day or ${money(s.total/days*7)}/week.`;
+  const days=Math.max(1,diffDays(s.start,s.end)+1),weeks=days/7;
+  $('#splitNote').innerHTML=`🧮 Auto-calculated: ${days} days = ${+weeks.toFixed(2)} weeks<br>${money(s.total)} ÷ ${days} days = <b>${money(s.daily)}/day</b><br>${money(s.total)} ÷ ${+weeks.toFixed(2)} weeks = <b>${money(s.weekly)}/week</b><br>Change the total or dates and these update on their own.`;
   renderAcctEdit()}
-const bindNum=(id,key)=>$(id).addEventListener('change',e=>{const v=num(e.target.value);if(isNaN(v)||v<0){toast('That needs to be a number 🔢',true);e.target.value=state.settings[key];return}state.settings[key]=Math.round(v*100)/100;save();renderSettings();renderAll()});
-bindNum('#sTotal','total');bindNum('#sDaily','daily');bindNum('#sWeekly','weekly');
-['#sStart','#sEnd'].forEach(id=>$(id).addEventListener('change',e=>{const k=id==='#sStart'?'start':'end';if(!e.target.value)return;const ns={...state.settings,[k]:e.target.value};if(ns.end<ns.start){toast('End has to be after the start 📅',true);renderSettings();return}state.settings=ns;save();renderSettings();renderAll()}));
+$('#sTotal').addEventListener('change',e=>{const v=num(e.target.value);if(isNaN(v)||v<0){toast('That needs to be a number 🔢',true);e.target.value=state.settings.total;return}state.settings.total=Math.round(v*100)/100;recalcLimits();save();renderSettings();renderAll();toast(`New limits: ${money(state.settings.daily)}/day · ${money(state.settings.weekly)}/week 🧮`)});
+['#sStart','#sEnd'].forEach(id=>$(id).addEventListener('change',e=>{const k=id==='#sStart'?'start':'end';if(!e.target.value)return;const ns={...state.settings,[k]:e.target.value};if(ns.end<ns.start){toast('End has to be after the start 📅',true);renderSettings();return}state.settings=ns;recalcLimits();save();renderSettings();renderAll()}));
 $('#sMode').onclick=e=>{const b=e.target.closest('button');if(!b)return;state.settings.mode=b.dataset.mode;save();renderSettings();renderAll()};
-$('#splitEven').onclick=()=>{const s=state.settings,days=Math.max(1,diffDays(s.start,s.end)+1);s.daily=Math.floor(s.total/days*100)/100;s.weekly=Math.floor(s.total/days*7*100)/100;save();renderSettings();renderAll();toast(`Limits set: ${money(s.daily)}/day · ${money(s.weekly)}/week ⚖️`)};
 $('#sKey').addEventListener('change',e=>{state.settings.apiKey=e.target.value.trim();save();toast('Key saved on this device 🔑')});
-$('#sModel').addEventListener('change',e=>{state.settings.model=e.target.value.trim()||'gemini-2.5-flash';save()});
+$('#sModel').addEventListener('change',e=>{state.settings.model=e.target.value.trim()||'gemini-3.8-flash';save()});
 $('#showKey').onclick=()=>{const k=$('#sKey');k.type=k.type==='password'?'text':'password'};
-$('#testKey').onclick=async()=>{state.settings.apiKey=$('#sKey').value.trim();state.settings.model=$('#sModel').value.trim()||'gemini-2.5-flash';save();
+$('#testKey').onclick=async()=>{state.settings.apiKey=$('#sKey').value.trim();state.settings.model=$('#sModel').value.trim()||'gemini-3.8-flash';save();
   if(!state.settings.apiKey){toast('Paste a key first 🔑',true);return}
   const b=$('#testKey');b.disabled=true;b.textContent='Testing…';
   try{await callGemini([{text:'Reply with the JSON {"ok":true}'}]);toast('Key works! Gemini is ready to read receipts ✨')}catch(e){toast('Nope: '+e.message,true)}finally{b.disabled=false;b.textContent='🧪 Test my key'}};
