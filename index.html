@@ -235,7 +235,7 @@ dialog::backdrop{background:#000a;backdrop-filter:blur(3px)}
       <input type="file" id="importIn" accept="application/json,.json" hidden>
       <button class="btn danger full" id="resetBtn" style="margin-top:10px">🧨 Wipe all purchases</button>
       <div class="note">Everything lives in this browser. Export a backup now and then so nothing gets lost.</div>
-      <div class="note mono" style="opacity:.6">App version 6 · auto limits</div>
+      <div class="note mono" style="opacity:.6">App version 7 · auto limits</div>
     </div>
   </section>
 </main>
@@ -555,7 +555,8 @@ function renderSettings(){const s=state.settings;
   const days=Math.max(1,diffDays(s.start,s.end)+1),weeks=days/7;
   $('#splitNote').innerHTML=`🧮 Auto-calculated: ${days} days = ${+weeks.toFixed(2)} weeks<br>${money(s.total)} ÷ ${days} days = <b>${money(s.daily)}/day</b><br>${money(s.total)} ÷ ${+weeks.toFixed(2)} weeks = <b>${money(s.weekly)}/week</b><br>Change the total or dates and these update on their own.`;
   renderAcctEdit()}
-$('#sTotal').addEventListener('change',e=>{const v=num(e.target.value);if(isNaN(v)||v<0){toast('That needs to be a number 🔢',true);e.target.value=state.settings.total;return}state.settings.total=Math.round(v*100)/100;recalcLimits();save();renderSettings();renderAll();toast(`New limits: ${money(state.settings.daily)}/day · ${money(state.settings.weekly)}/week 🧮`)});
+$('#sTotal').addEventListener('input',e=>{const v=num(e.target.value);if(isNaN(v)||v<=0)return;state.settings.total=Math.round(v*100)/100;recalcLimits();save();$('#sDaily').textContent=money(state.settings.daily);$('#sWeekly').textContent=money(state.settings.weekly);renderAll()});
+$('#sTotal').addEventListener('change',e=>{const v=num(e.target.value);if(isNaN(v)||v<=0){e.target.value=state.settings.total;return}renderSettings()});
 ['#sStart','#sEnd'].forEach(id=>$(id).addEventListener('change',e=>{const k=id==='#sStart'?'start':'end';if(!e.target.value)return;const ns={...state.settings,[k]:e.target.value};if(ns.end<ns.start){toast('End has to be after the start 📅',true);renderSettings();return}state.settings=ns;recalcLimits();save();renderSettings();renderAll()}));
 $('#sMode').onclick=e=>{const b=e.target.closest('button');if(!b)return;state.settings.mode=b.dataset.mode;save();renderSettings();renderAll()};
 $('#sKey').addEventListener('change',e=>{state.settings.apiKey=e.target.value.trim();save();toast('Key saved on this device 🔑')});
