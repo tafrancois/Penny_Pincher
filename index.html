@@ -235,7 +235,7 @@ dialog::backdrop{background:#000a;backdrop-filter:blur(3px)}
       <input type="file" id="importIn" accept="application/json,.json" hidden>
       <button class="btn danger full" id="resetBtn" style="margin-top:10px">🧨 Wipe all purchases</button>
       <div class="note">Everything lives in this browser. Export a backup now and then so nothing gets lost.</div>
-      <div class="note mono" style="opacity:.6">App version 8 · payday mode</div>
+      <div class="note mono" style="opacity:.6">App version 10 · account fixes</div>
     </div>
   </section>
 </main>
@@ -259,6 +259,7 @@ dialog::backdrop{background:#000a;backdrop-filter:blur(3px)}
     <div><label for="eAcct">Paid from</label><select id="eAcct"></select></div>
   </div>
   <button class="btn ghost full" id="eFav" style="margin-top:12px">⭐ Save to Quick add</button>
+  <div id="eAcctNote" class="note" hidden style="background:var(--card2);padding:10px;border-radius:12px"></div>
   <img id="eThumb" class="bigthumb" alt="" hidden>
   <div class="dlg-btns">
     <button class="btn danger" id="eDel">Delete</button>
@@ -311,7 +312,11 @@ let toastT;function toast(msg,bad,undo){const t=$('#toast');t.textContent=msg;t.
   clearTimeout(toastT);toastT=setTimeout(()=>t.className='',undo?5000:3200)}
 
 /* ---------- MATH ---------- */
-function acctBalance(a){return a.balance-sum(state.purchases.filter(p=>p.account===a.id&&(p.ts||0)>(a.asOf||0)))}
+const counted=(p,a)=>p.account===a.id&&(p.acctTs||p.ts||0)>(a.asOf||0);
+function acctBalance(a){return a.balance-sum(state.purchases.filter(p=>counted(p,a)))}
+function acctSpentSince(a){return sum(state.purchases.filter(p=>counted(p,a)))}
+const normName=x=>String(x||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+function matchAcct(name){const n=normName(name);if(!n)return null;return state.accounts.find(a=>normName(a.name)===n)||state.accounts.find(a=>{const m=normName(a.name);return m&&(m.includes(n)||n.includes(m))})||null}
 function calc(){
   const s=state.settings,t=todayISO(),P=state.purchases;
   const inRange=P.filter(p=>p.date>=s.start&&p.date<=s.end);
@@ -368,7 +373,7 @@ function renderAccounts(){
   const A=state.accounts;
   if(!A.length){$('#acctList').innerHTML=`<div class="empty" style="padding:8px 0"><div>🏦</div>Add your two accounts to see what’s really in them.</div><button class="btn lime full" data-go="settings" data-scroll="acctSettings">+ Add accounts</button>`;return}
   const tot=A.reduce((t,a)=>t+acctBalance(a),0);const c=calc();
-  $('#acctList').innerHTML=A.map(a=>{const b=acctBalance(a);return`<button class="acct" data-bal="${a.id}"><div><div class="an">${esc(a.name)}</div><div class="as">synced ${a.asOf?new Date(a.asOf).toLocaleDateString(undefined,{month:'short',day:'numeric'}):'—'} · tap to update</div></div><div class="ab" style="color:var(--${b<0?'pink':'ink'})">${money(b)}</div></button>`}).join('')+
+  $('#acctList').innerHTML=A.map(a=>{const b=acctBalance(a);return`<button class="acct" data-bal="${a.id}"><div><div class="an">${esc(a.name)}</div><div class="as">${a.balance!=null?money(a.balance)+' at sync':''}${acctSpentSince(a)?' − '+money(acctSpentSince(a))+' logged':''} · tap to update</div></div><div class="ab" style="color:var(--${b<0?'pink':'ink'})">${money(b)}</div></button>`}).join('')+
   `<div style="display:flex;justify-content:space-between;font-weight:800;padding:6px 4px 0"><span>Total in the bank</span><span class="mono">${money(tot)}</span></div>`+
   (c.status!=='after'?`<div class="note">${tot>=c.remaining?`You’ve got ${money(tot-c.remaining)} more in the bank than your budget lets you spend. Protect it 🛡️`:`Heads up: your accounts hold ${money(c.remaining-tot)} LESS than your budget left 🚩`}</div>`:'');
 }
@@ -403,11 +408,13 @@ function renderHistory(){
 
 /* ---------- ADD ---------- */
 let imgs=[];let drafts=[];
-const newDraft=(o={})=>({name:'',amount:'',category:'Food',date:todayISO(),account:state.lastAcct||(state.accounts[0]?.id||''),...o});
-function acctOptions(sel){return`<option value="">— no account —</option>`+state.accounts.map(a=>`<option value="${a.id}" ${a.id===sel?'selected':''}>${esc(a.name)}</option>`).join('')}
+const newDraft=(o={})=>({name:'',amount:'',category:'Food',date:todayISO(),account:state.accounts.some(a=>a.id===state.lastAcct)?state.lastAcct:(state.accounts[0]?.id||''),...o});
+function acctOptions(sel){return`<option value="" ${!sel?'selected':''}>💵 Not from a bank account</option>`+state.accounts.map(a=>`<option value="${a.id}" ${a.id===sel?'selected':''}>🏦 Paid from ${esc(a.name)}</option>`).join('')}
 function catOptions(sel){return CATS.map(([c,e])=>`<option value="${c}" ${c===sel?'selected':''}>${e} ${c}</option>`).join('')}
 function renderDrafts(){
   if(!drafts.length)drafts=[newDraft()];
+  const ids=state.accounts.map(a=>a.id),def=ids.includes(state.lastAcct)?state.lastAcct:(ids[0]||'');
+  drafts.forEach(d=>{if(!d.acctTouched&&!ids.includes(d.account))d.account=def});
   $('#drafts').innerHTML=drafts.map((d,i)=>`<div class="draft" data-i="${i}">
     ${drafts.length>1?`<button class="x" data-rm="${i}" aria-label="remove">✕</button>`:''}
     <button class="star" data-star="${i}" aria-label="save to quick add" style="${drafts.length>1?'':'right:-8px'}">⭐</button>
@@ -419,7 +426,7 @@ function renderDrafts(){
 }
 function updDraftTotal(){const t=drafts.reduce((s,d)=>s+(isNaN(num(d.amount))?0:num(d.amount)),0);$('#draftTotal').textContent=money(t)}
 $('#drafts').addEventListener('input',e=>{const box=e.target.closest('.draft');if(!box)return;drafts[+box.dataset.i][e.target.dataset.f]=e.target.value;updDraftTotal()});
-$('#drafts').addEventListener('change',e=>{const box=e.target.closest('.draft');if(!box)return;drafts[+box.dataset.i][e.target.dataset.f]=e.target.value});
+$('#drafts').addEventListener('change',e=>{const box=e.target.closest('.draft');if(!box)return;const d=drafts[+box.dataset.i];d[e.target.dataset.f]=e.target.value;if(e.target.dataset.f==='account')d.acctTouched=true});
 $('#drafts').addEventListener('click',e=>{const b=e.target.closest('[data-rm]');if(b){drafts.splice(+b.dataset.rm,1);renderDrafts();return}
   const st=e.target.closest('[data-star]');if(st)addFav(drafts[+st.dataset.star])});
 
@@ -433,7 +440,7 @@ function renderFavs(){document.querySelectorAll('[data-favbox]').forEach(box=>{
   box.innerHTML=state.favs.length?state.favs.map(f=>`<button class="fav ${favEdit?'del':''}" data-${favEdit?'delfav':'fav'}="${f.id}">${favEdit?'✕':catEmoji(f.category)} ${esc(f.name)} <b>${money(f.amount)}</b></button>`).join(''):`<div class="muted">Tap ⭐ on any purchase to save it here. Then it’s one tap to log your regulars (coffee, gas, bus fare…).</div>`});
   document.querySelectorAll('[data-favedit]').forEach(b=>{b.textContent=favEdit?'✅ Done':'✏️ Edit';b.style.display=state.favs.length?'':'none'})}
 function logFav(id){const f=state.favs.find(x=>x.id===id);if(!f)return;
-  const p={id:uid(),name:f.name,amount:f.amount,category:f.category,date:todayISO(),account:state.accounts.some(a=>a.id===f.account)?f.account:'',ts:Date.now(),thumb:''};
+  const p={id:uid(),name:f.name,amount:f.amount,category:f.category,date:todayISO(),account:state.accounts.some(a=>a.id===f.account)?f.account:'',ts:Date.now(),acctTs:Date.now(),thumb:''};
   state.purchases.push(p);if(!save()){state.purchases.pop();return}renderAll();const c=calc();
   toast(`⚡ ${f.name} ${money(f.amount)} · ${money(c.s.mode==='daily'?c.s.daily-c.spentToday:c.wLimit-c.spentWeek)} left ${c.s.mode==='daily'?'today':'this week'}`,false,()=>{state.purchases=state.purchases.filter(x=>x.id!==p.id);save();renderAll()})}
 document.addEventListener('click',e=>{
@@ -446,11 +453,11 @@ $('#saveDrafts').onclick=()=>{
   const good=drafts.filter(d=>!isNaN(num(d.amount))&&num(d.amount)!==0);
   if(!good.length){toast('Put an amount in first! 💵',true);return}
   const thumb=imgs[0]?.thumb||'';const now=Date.now();
-  good.forEach((d,i)=>state.purchases.push({id:uid(),name:d.name.trim()||'Purchase',amount:Math.round(num(d.amount)*100)/100,category:d.category,date:d.date||todayISO(),account:d.account||'',ts:now+i,thumb}));
+  good.forEach((d,i)=>state.purchases.push({id:uid(),name:d.name.trim()||'Purchase',amount:Math.round(num(d.amount)*100)/100,category:d.category,date:d.date||todayISO(),account:d.account||'',ts:now+i,acctTs:now+i,thumb}));
   if(good[0].account)state.lastAcct=good[0].account;
   if(!save()){state.purchases.splice(-good.length);return}
   const t=sum(good);drafts=[];imgs=[];$('#aiNote').value='';renderThumbs();renderDrafts();
-  const c=calc();go('home');
+  renderAll();const c=calc();go('home');
   toast(`Logged ${money(t)} 💸 ${money(c.s.mode==='daily'?c.s.daily-c.spentToday:c.wLimit-c.spentWeek)} left ${c.s.mode==='daily'?'today':'this week'}`);
 };
 // images
@@ -507,7 +514,7 @@ $('#aiBtn').onclick=async()=>{
     let txt=await callGemini(parts);txt=txt.replace(/^```(json)?/i,'').replace(/```$/,'').trim();
     const data=JSON.parse(txt);const E=(data.entries||[]).filter(e=>e&&isFinite(+e.amount));
     if(!E.length){toast(data.comment||'Couldn’t find a purchase in that 🤔 type it in below!',true);return}
-    const mapped=E.map(e=>{const a=state.accounts.find(x=>x.name.toLowerCase()===String(e.account||'').toLowerCase());
+    const mapped=E.map(e=>{const a=matchAcct(e.account);
       return newDraft({name:String(e.name||'').slice(0,60),amount:(+e.amount).toFixed(2),category:CATS.some(c=>c[0]===e.category)?e.category:'Other',date:/^\d{4}-\d{2}-\d{2}$/.test(e.date||'')?e.date:todayISO(),...(a?{account:a.id}:{})})});
     drafts=drafts.filter(d=>String(d.amount).trim()||d.name.trim()).concat(mapped);renderDrafts();
     toast(data.comment?('✨ '+data.comment):`✨ Found ${mapped.length} — double-check & hit Log it`);
@@ -523,13 +530,20 @@ document.addEventListener('click',e=>{
   const bal=e.target.closest('[data-bal]');if(bal){openBal(bal.dataset.bal);return}
   const g=e.target.closest('[data-go]');if(g){go(g.dataset.go,g.dataset.scroll)}
 });
-function openEdit(id){const p=state.purchases.find(x=>x.id===id);if(!p)return;editing=p;
+let forceCount=false;
+function acctNote(){const p=editing,a=state.accounts.find(x=>x.id===$('#eAcct').value),box=$('#eAcctNote');
+  if(!a||a.id!==p.account||counted(p,a)){box.hidden=true;return}
+  box.hidden=false;box.innerHTML=`⚠️ Not subtracted from ${esc(a.name)}: it was logged before you last updated that balance, so the app assumed your bank number already included it.<button class="btn sm sun" id="eCount" style="margin-top:8px;width:100%">➖ Subtract it from ${esc(a.name)}</button>`;
+  $('#eCount').onclick=()=>{forceCount=true;$('#eSave').click()}}
+function openEdit(id){const p=state.purchases.find(x=>x.id===id);if(!p)return;editing=p;forceCount=false;
   $('#eName').value=p.name;$('#eAmt').value=p.amount.toFixed(2);$('#eDate').value=p.date;$('#eCat').innerHTML=catOptions(p.category);$('#eAcct').innerHTML=acctOptions(p.account);
   const th=$('#eThumb');th.hidden=!p.thumb;if(p.thumb)th.src=p.thumb;
-  $('#eDel').textContent='Delete';$('#eDel').dataset.armed='';$('#editDlg').showModal()}
+  $('#eDel').textContent='Delete';$('#eDel').dataset.armed='';acctNote();$('#editDlg').showModal()}
 $('#eCancel').onclick=()=>$('#editDlg').close();
+$('#eAcct').addEventListener('change',()=>{$('#eAcctNote').hidden=true});
 $('#eFav').onclick=()=>addFav({name:$('#eName').value,amount:$('#eAmt').value,category:$('#eCat').value,account:$('#eAcct').value});
 $('#eSave').onclick=()=>{const a=num($('#eAmt').value);if(isNaN(a)){toast('That amount looks off 🤨',true);return}
+  const newAcct=$('#eAcct').value;if(newAcct!==editing.account||forceCount)editing.acctTs=Date.now();forceCount=false;
   Object.assign(editing,{name:$('#eName').value.trim()||'Purchase',amount:Math.round(a*100)/100,date:$('#eDate').value||editing.date,category:$('#eCat').value,account:$('#eAcct').value});
   save();$('#editDlg').close();renderAll();toast('Updated ✅')};
 $('#eDel').onclick=()=>{const b=$('#eDel');if(!b.dataset.armed){b.dataset.armed='1';b.textContent='Tap again 🗑️';return}
@@ -577,7 +591,7 @@ $('#resetBtn').onclick=()=>{if(!confirm('Wipe ALL purchases? Settings & accounts
 /* ---------- NAV ---------- */
 function go(v,scrollTo){document.querySelectorAll('.view').forEach(x=>x.classList.toggle('on',x.id==='view-'+v));
   document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.go===v));
-  if(v==='settings')renderSettings();if(v==='add')renderDrafts();if(v==='history')renderHistory();
+  if(v==='home')renderHome();if(v==='settings')renderSettings();if(v==='add')renderDrafts();if(v==='history')renderHistory();renderFavs();
   if(scrollTo)setTimeout(()=>document.getElementById(scrollTo)?.scrollIntoView({behavior:'smooth'}),60);else window.scrollTo({top:0})}
 function renderAll(){renderHome();renderHistory();renderFavs();if($('#view-add').classList.contains('on'))renderDrafts()}
 renderAll();renderDrafts();
