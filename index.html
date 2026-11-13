@@ -235,6 +235,7 @@ dialog::backdrop{background:#000a;backdrop-filter:blur(3px)}
       <input type="file" id="importIn" accept="application/json,.json" hidden>
       <button class="btn danger full" id="resetBtn" style="margin-top:10px">🧨 Wipe all purchases</button>
       <div class="note">Everything lives in this browser. Export a backup now and then so nothing gets lost.</div>
+      <div class="note mono" style="opacity:.6">App version 6 · auto limits</div>
     </div>
   </section>
 </main>
@@ -578,7 +579,12 @@ function renderAll(){renderHome();renderHistory();renderFavs();if($('#view-add')
 renderAll();renderDrafts();
 // refresh when the day rolls over / app comes back
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)renderAll()});
-if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('sw.js').catch(()=>{});
+if('serviceWorker' in navigator&&location.protocol.startsWith('http')){
+  const hadSW=!!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{});
+  // when a new version installs, reload once so it shows up immediately
+  let reloaded=false;navigator.serviceWorker.addEventListener('controllerchange',()=>{if(hadSW&&!reloaded){reloaded=true;location.reload()}});
+}
 </script>
 </body>
 </html>
